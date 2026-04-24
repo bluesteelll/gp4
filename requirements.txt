@@ -5,3 +5,4 @@ loguru
 pandas
 tavily-python
 langchain-community
+python-dotenv
