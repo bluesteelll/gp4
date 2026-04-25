@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 
 @tool
 def python_exec(code):
+    """Execute Python code in an isolated subprocess with a 60-second timeout. Returns stdout, stderr, and returncode."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
         f.write(code)
         script_path = f.name

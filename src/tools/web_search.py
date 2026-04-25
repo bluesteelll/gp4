@@ -15,5 +15,9 @@ def _get_client():
 
 @tool
 def tavily_search(query):
-    response = _get_client().search(query, max_results=5)
-    return response.get("results", [])
+    """Search the web via Tavily and return up to 5 results with title, url, and content snippet."""
+    try:
+        response = _get_client().search(query, max_results=5)
+        return response.get("results", [])
+    except Exception as e:
+        return {"error": f"Search failed: {type(e).__name__}: {e}"}

@@ -24,6 +24,11 @@ class AgentState(TypedDict):
     session_id: str
     session_dir: str
 
+    task: str
+    plan: List[str]
+    step: int
+    final_report: Optional[str]
+
     next: str
 
     session_log: Annotated[List[str], operator.add]

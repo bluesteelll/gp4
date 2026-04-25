@@ -12,6 +12,15 @@ from workflow import agents
 
 
 MARKER = "AGENT_RESULT_DATA:"
+DATA_AGENTS = [
+    "data_collector",
+    "data_preprocessor",
+    "data_validator",
+    "data_analyzer",
+    "trainer",
+    "model_reviser",
+    "summarizer",
+]
 
 
 def parse_final_result(text):
@@ -45,10 +54,85 @@ def info_from_result(result, fallback_text):
 
 
 def run_agent(name, task):
+    print(f"\n--- {name} START ---", flush=True)
     response = agents[name].invoke({"messages": [("user", task)]})
     messages = response["messages"]
     final = messages[-1].content
+    print(f"--- {name} END ---\n{final[:800]}\n", flush=True)
     return messages, final, parse_final_result(final)
+
+
+def advance_step(state):
+    return state.get("step", 0) + 1
+
+
+def get_next_step(state):
+    plan = state.get("plan", [])
+    step = state.get("step", 0)
+    if step >= len(plan):
+        return "orchestrator_respond"
+    next_name = plan[step]
+    if next_name not in DATA_AGENTS:
+        return "orchestrator_respond"
+    return next_name
+
+
+def orchestrator_plan_node(state):
+    task = state["task"]
+    history = state.get("long_term_memory", {}).get("history", [])
+
+    user_msg = f"User task: {task}\n\nDecide which agents to run for this task."
+    if history:
+        user_msg += f"\n\nPast sessions for context:\n{json.dumps(history[-5:], indent=2)}"
+
+    messages, final, result = run_agent("orchestrator", user_msg)
+    plan = result.get("plan", [])
+
+    return {
+        "messages": messages,
+        "plan": plan,
+        "step": 0,
+        "session_log": [f"orchestrator: planned {plan}"],
+    }
+
+
+def orchestrator_respond_node(state):
+    session_dir = Path(state["session_dir"])
+    summary_info = {
+        "task": state.get("task", ""),
+        "plan": state.get("plan", []),
+        "preprocessing_info": state.get("preprocessing_info"),
+        "dataset_info": state.get("dataset_info"),
+        "training_results": state.get("training_results"),
+        "metrics": state.get("metrics"),
+        "best_model_name": state.get("best_model_name"),
+        "error": state.get("error"),
+        "session_log": state.get("session_log", []),
+        "session_dir": str(session_dir),
+    }
+
+    user_msg = (
+        f"The pipeline has finished. Here are the results:\n\n"
+        f"{json.dumps(summary_info, indent=2, ensure_ascii=False, default=str)}\n\n"
+        f"Generate the final markdown report for the user and the structured artifact."
+    )
+    messages, final, result = run_agent("orchestrator", user_msg)
+
+    final_report = result.get("final_report", final)
+    artifact = result.get("artifact", {})
+
+    (session_dir / "final_report.md").write_text(final_report, encoding="utf-8")
+    (session_dir / "final_artifact.json").write_text(
+        json.dumps(artifact, indent=2, ensure_ascii=False, default=str),
+        encoding="utf-8",
+    )
+    update_meta(session_dir, status="completed")
+
+    return {
+        "messages": messages,
+        "final_report": final_report,
+        "session_log": ["orchestrator: report ready"],
+    }
 
 
 def collector_node(state):
@@ -65,13 +149,14 @@ def collector_node(state):
         "messages": messages,
         "dataset_path": str(raw_path),
         "notes": result.get("notes", {}),
+        "step": advance_step(state),
         "session_log": ["collector: raw data saved"],
     }
 
 
 def preprocessor_node(state):
     paths = session_paths(state["session_dir"])
-    raw_path = state["dataset_path"]
+    raw_path = state.get("dataset_path", "")
     processed_path = paths["processed_data"]
 
     task = compose_task(
@@ -85,13 +170,14 @@ def preprocessor_node(state):
         "dataset_path": str(processed_path),
         "preprocessing_info": info_from_result(result, final),
         "notes": result.get("notes", {}),
+        "step": advance_step(state),
         "session_log": ["preprocessor: cleaned"],
     }
 
 
 def validator_node(state):
     paths = session_paths(state["session_dir"])
-    dataset_path = state["dataset_path"]
+    dataset_path = state.get("dataset_path", "")
     report_path = paths["validation_report"]
 
     task = compose_task(
@@ -106,13 +192,14 @@ def validator_node(state):
         "messages": messages,
         "error": None if passed else (result.get("summary") or final),
         "notes": result.get("notes", {}),
+        "step": advance_step(state),
         "session_log": [f"validator: {verdict or 'unknown'}"],
     }
 
 
 def analyzer_node(state):
     paths = session_paths(state["session_dir"])
-    dataset_path = state["dataset_path"]
+    dataset_path = state.get("dataset_path", "")
     report_path = paths["analysis_report"]
 
     task = compose_task(
@@ -125,13 +212,14 @@ def analyzer_node(state):
         "messages": messages,
         "dataset_info": info_from_result(result, final),
         "notes": result.get("notes", {}),
+        "step": advance_step(state),
         "session_log": ["analyzer: done"],
     }
 
 
 def trainer_node(state):
     paths = session_paths(state["session_dir"])
-    dataset_path = state["dataset_path"]
+    dataset_path = state.get("dataset_path", "")
     model_path = paths["model"]
 
     task = compose_task(
@@ -145,13 +233,14 @@ def trainer_node(state):
         "best_model_name": result.get("model_name", "model.pkl"),
         "training_results": info_from_result(result, final),
         "notes": result.get("notes", {}),
+        "step": advance_step(state),
         "session_log": ["trainer: model saved"],
     }
 
 
 def reviser_node(state):
     paths = session_paths(state["session_dir"])
-    dataset_path = state["dataset_path"]
+    dataset_path = state.get("dataset_path", "")
     model_path = paths["model_dir"] / state.get("best_model_name", "model.pkl")
     eval_path = paths["evaluation_report"]
 
@@ -165,6 +254,7 @@ def reviser_node(state):
         "messages": messages,
         "metrics": info_from_result(result, final),
         "notes": result.get("notes", {}),
+        "step": advance_step(state),
         "session_log": [f"reviser: {result.get('verdict', 'unknown')}"],
     }
 
@@ -188,9 +278,10 @@ def summarizer_node(state):
         "timestamp": datetime.now().isoformat(),
         "summary_path": str(summary_path),
     })
-    update_meta(session_dir, summary_path=str(summary_path), status="completed")
+    update_meta(session_dir, summary_path=str(summary_path))
 
     return {
         "messages": messages,
+        "step": advance_step(state),
         "session_log": ["summarizer: done"],
     }

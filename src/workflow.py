@@ -11,6 +11,7 @@ from agents import (
     data_preprocessor,
     data_validator,
     model_reviser,
+    orchestrator,
     summarizer,
     trainer,
 )
@@ -37,6 +38,7 @@ def make_llm(model, temperature=0.0):
 
 
 METAS = [
+    orchestrator,
     data_collector,
     data_preprocessor,
     data_validator,
