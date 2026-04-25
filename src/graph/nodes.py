@@ -12,6 +12,7 @@ from workflow import agents
 
 
 MARKER = "AGENT_RESULT_DATA:"
+MAX_RETRIES = 2
 DATA_AGENTS = [
     "data_collector",
     "data_preprocessor",
@@ -64,6 +65,20 @@ def run_agent(name, task):
 
 def advance_step(state):
     return state.get("step", 0) + 1
+
+
+def with_retry(update, state, new_step, retry_chain, log_label):
+    retry_count = state.get("retry_count", 0)
+    if retry_count >= MAX_RETRIES:
+        return update
+    plan = state.get("plan", [])
+    extended = dict(update)
+    extended["plan"] = plan[:new_step] + retry_chain + plan[new_step:]
+    extended["retry_count"] = retry_count + 1
+    extended["session_log"] = list(update.get("session_log", [])) + [
+        f"{log_label}: injecting retry {retry_count + 1}/{MAX_RETRIES} ({retry_chain})"
+    ]
+    return extended
 
 
 def get_next_step(state):
@@ -187,14 +202,20 @@ def validator_node(state):
     messages, final, result = run_agent("data_validator", task)
     verdict = result.get("verdict", "")
     passed = verdict == "pass"
+    new_step = advance_step(state)
 
-    return {
+    update = {
         "messages": messages,
         "error": None if passed else (result.get("summary") or final),
         "notes": result.get("notes", {}),
-        "step": advance_step(state),
+        "step": new_step,
         "session_log": [f"validator: {verdict or 'unknown'}"],
     }
+
+    if verdict == "fail":
+        update = with_retry(update, state, new_step, ["data_preprocessor", "data_validator"], "validator")
+
+    return update
 
 
 def analyzer_node(state):
@@ -249,14 +270,29 @@ def reviser_node(state):
         incoming_note(state, "model_reviser"),
     )
     messages, final, result = run_agent("model_reviser", task)
+    verdict = result.get("verdict", "")
+    new_step = advance_step(state)
 
-    return {
+    update = {
         "messages": messages,
         "metrics": info_from_result(result, final),
         "notes": result.get("notes", {}),
-        "step": advance_step(state),
-        "session_log": [f"reviser: {result.get('verdict', 'unknown')}"],
+        "step": new_step,
+        "session_log": [f"reviser: {verdict or 'unknown'}"],
     }
+
+    if verdict == "needs_more_training":
+        update = with_retry(update, state, new_step, ["trainer", "model_reviser"], "reviser")
+    elif verdict == "needs_more_data":
+        update = with_retry(
+            update,
+            state,
+            new_step,
+            ["data_collector", "data_preprocessor", "data_validator", "trainer", "model_reviser"],
+            "reviser",
+        )
+
+    return update
 
 
 def summarizer_node(state):
