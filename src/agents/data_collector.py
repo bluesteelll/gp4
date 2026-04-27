@@ -1,6 +1,7 @@
 from tools.file_tools import write_file
 from tools.python_exec import python_exec
+from tools.web_search import tavily_search
 
 NAME = "data_collector"
 MODEL = "gpt-4.1-mini"
-TOOLS = [write_file, python_exec]
+TOOLS = [write_file, python_exec, tavily_search]
