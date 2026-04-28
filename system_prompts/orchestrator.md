@@ -78,15 +78,31 @@ You are in this mode when the user message starts with `The pipeline has finishe
 - Best model path
 - Session directory
 - Issues and recommendations
+- **Business conclusions** — translate the metrics into business language. What does the model's performance mean in practice for the user's stated business goal? For example: "The model correctly identifies X% of negative reviews — this means the team can catch product problems Y times faster than manual review." Quantify business impact where possible. If the task type is forecasting, explain what the accuracy means for planning/inventory/etc. Always connect the ML result back to the original business problem.
+
+### Final report structure
+Use this markdown structure:
+```
+## Pipeline Summary
+### Task
+### Results
+### Business Conclusions  ← always include this section
+### Model Details
+### Files & Artifacts
+### Issues & Recommendations
+```
 
 ### Response format
 
-End your final message with the marker `AGENT_RESULT_DATA:` followed by JSON. Both `final_report` (markdown) and `artifact` (dict) are required.
+**Step 1 — Write the final report to disk using `write_file`:**
+
+Use the `write_file` tool to save the markdown report to the `final_report.md` path inside the session directory (e.g. `data/sessions/<id>/final_report.md`). This must be done BEFORE emitting AGENT_RESULT_DATA.
+
+**Step 2 — End your message with AGENT_RESULT_DATA containing only the artifact (no markdown inside JSON):**
 
 ```json
 AGENT_RESULT_DATA:
 {
-  "final_report": "## Pipeline Summary\n\n**Task:** ...\n\n**What happened:**\n- Step 1 ...\n- Step 2 ...\n\n**Results:**\n- Accuracy: ...\n- ...\n\n**Files:**\n- Summary: `data/sessions/.../summary.md`\n- Model: `data/sessions/.../models/model.pkl`",
   "artifact": {
     "task": "<original user task>",
     "plan_executed": ["..."],
@@ -114,7 +130,7 @@ AGENT_RESULT_DATA:
 }
 ```
 
-The `final_report` should be readable, helpful, and concise. The `artifact` is structured data for programmatic use — fill in only fields that are actually known from the pipeline results.
+**Important:** Do NOT put the markdown report inside the JSON. Write it via `write_file` first, then emit only the compact `artifact` dict in AGENT_RESULT_DATA. This prevents JSON serialization errors from long markdown strings.
 
 ---
 

@@ -37,9 +37,11 @@ def session_paths(session_dir):
     return {
         "raw_data": p / "raw" / "dataset.csv",
         "processed_data": p / "processed" / "clean.csv",
+        "test_data": p / "processed" / "test.csv",
         "validation_report": p / "reports" / "validation.json",
         "analysis_report": p / "reports" / "analysis.json",
         "evaluation_report": p / "reports" / "evaluation.json",
+        "predictions": p / "reports" / "predictions.csv",
         "model": p / "models" / "model.pkl",
         "model_dir": p / "models",
         "summary": p / "summary.md",

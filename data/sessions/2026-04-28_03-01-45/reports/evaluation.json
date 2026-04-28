@@ -1,0 +1,26 @@
+{
+  "task": "classification",
+  "n_samples": 20000,
+  "metrics": {
+    "accuracy": 0.94945,
+    "precision": 0.9869880838241337,
+    "recall": 0.946103853476006,
+    "f1": 0.9661136249371544,
+    "roc_auc": 0.9874291115871604
+  },
+  "confusion_matrix": [
+    [
+      4577,
+      190
+    ],
+    [
+      821,
+      14412
+    ]
+  ],
+  "class_distribution": {
+    "1": 15233,
+    "0": 4767
+  },
+  "note": "Evaluated on clean.csv (no held-out split; metrics may optimistically reflect training data)."
+}

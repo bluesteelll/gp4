@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from session import (
     update_meta,
 )
 from workflow import agents
+
+AGENT_TIMEOUT = 600  # seconds per agent
 
 
 MARKER = "AGENT_RESULT_DATA:"
@@ -96,9 +99,17 @@ def normalize_created_features(value):
 def run_agent(name, task):
     print(f"\n--- {name} START ---", flush=True)
 
-    response = agents[name].invoke({
-        "messages": [("user", task)]
-    })
+    def _invoke():
+        return agents[name].invoke({"messages": [("user", task)]})
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_invoke)
+        try:
+            response = future.result(timeout=AGENT_TIMEOUT)
+        except FuturesTimeoutError:
+            raise RuntimeError(
+                f"Agent '{name}' timed out after {AGENT_TIMEOUT}s"
+            )
 
     messages = response["messages"]
     final = messages[-1].content
@@ -204,10 +215,17 @@ def orchestrator_respond_node(state):
 
     messages, final, result = run_agent("orchestrator", user_msg)
 
-    final_report = result.get("final_report", final)
     artifact = result.get("artifact", {})
 
-    (session_dir / "final_report.md").write_text(final_report, encoding="utf-8")
+    # Orchestrator writes final_report.md itself via write_file tool.
+    # Fall back to the raw LLM text only if the file wasn't created.
+    report_path = session_dir / "final_report.md"
+    if not report_path.exists():
+        final_report = result.get("final_report", final)
+        report_path.write_text(final_report, encoding="utf-8")
+    else:
+        final_report = report_path.read_text(encoding="utf-8")
+
     (session_dir / "final_artifact.json").write_text(
         json.dumps(artifact, indent=2, ensure_ascii=False, default=str),
         encoding="utf-8",
@@ -228,7 +246,8 @@ def collector_node(state):
     raw_path = paths["raw_data"]
 
     task = compose_task(
-        f"Collect a dataset for ML training and save it to: {raw_path}",
+        f"User task: {state.get('task', '')}\n\n"
+        f"Collect a suitable dataset for this task and save it to: {raw_path}",
         incoming_note(state, "data_collector"),
     )
 
@@ -351,12 +370,14 @@ def trainer_node(state):
     paths = session_paths(state["session_dir"])
     dataset_path = state.get("dataset_path", "")
     model_path = paths["model"]
+    test_path = paths["test_data"]
 
     task = compose_task(
         f"Training dataset: {dataset_path}\n"
         f"Target column, if known: {state.get('target_column')}\n"
         f"Task type, if known: {state.get('task_type')}\n"
-        f"Save the trained model to: {model_path}",
+        f"Save the trained model to: {model_path}\n"
+        f"Save the held-out test split (20%) to: {test_path}",
         incoming_note(state, "trainer"),
     )
 
@@ -366,6 +387,7 @@ def trainer_node(state):
         "messages": messages,
         "best_model_name": result.get("model_name", "model.pkl"),
         "best_model_path": str(model_path),
+        "test_dataset_path": str(test_path),
         "training_results": info_from_result(result, final),
         "task_type": result.get("task_type", state.get("task_type")),
         "current_step": "training",
@@ -378,19 +400,21 @@ def trainer_node(state):
 
 def reviser_node(state):
     paths = session_paths(state["session_dir"])
-    dataset_path = state.get("dataset_path", "")
+    dataset_path = state.get("test_dataset_path") or state.get("dataset_path", "")
 
     model_path = state.get("best_model_path") or str(
         paths["model_dir"] / state.get("best_model_name", "model.pkl")
     )
 
     eval_path = paths["evaluation_report"]
+    predictions_path = paths["predictions"]
 
     task = compose_task(
         f"Model to evaluate: {model_path}\n"
         f"Test dataset: {dataset_path}\n"
         f"Task type, if known: {state.get('task_type')}\n"
-        f"Save the evaluation report to: {eval_path}",
+        f"Save the evaluation report to: {eval_path}\n"
+        f"Save predictions (y_true, y_pred, y_prob if available) to: {predictions_path}",
         incoming_note(state, "model_reviser"),
     )
 

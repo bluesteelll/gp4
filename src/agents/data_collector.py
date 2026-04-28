@@ -3,5 +3,5 @@ from tools.python_exec import python_exec
 from tools.web_search import tavily_search
 
 NAME = "data_collector"
-MODEL = "gpt-4.1-mini"
+MODEL = "claude-sonnet-4-6"
 TOOLS = [write_file, python_exec, tavily_search]

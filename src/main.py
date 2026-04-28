@@ -47,6 +47,7 @@ def main():
             "training_results": None,
             "best_model_name": None,
             "best_model_path": None,
+            "test_dataset_path": None,
             "metrics": None,
             "long_term_memory": {"history": memory},
             "error": None,

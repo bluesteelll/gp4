@@ -54,6 +54,7 @@ class AgentState(TypedDict):
     training_results: Optional[Dict[str, Any]]
     best_model_name: Optional[str]
     best_model_path: Optional[str]
+    test_dataset_path: Optional[str]
     metrics: Optional[Dict[str, Any]]
 
     long_term_memory: Optional[Dict[str, Any]]
